@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "migrate": "tsx src/migrate.ts",
-    "test": "vitest run",
-    "key": "tsx src/scripts/api-key.ts"
+  "migrate": "tsx src/migrate.ts",
+  "test": "vitest run",
+  "check": "tsc --noEmit && vitest run",
+  "key": "tsx src/scripts/api-key.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
