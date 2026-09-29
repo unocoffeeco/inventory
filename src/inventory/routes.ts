@@ -3,10 +3,11 @@ import { ZodError } from 'zod';
 import { pool } from '../db/pool.js';
 import { AppError, postOperation } from './service.js';
 import { opSchema } from './schemas.js';
+import { requireScope } from '../auth/apiKeys.js';
 
 export const router = Router();
 
-router.post('/operations', async (req, res) => {
+router.post('/operations', requireScope('inventory:write'), async (req, res) => {
   try {
     const key = req.header('Idempotency-Key');
     if (!key) throw new AppError('Idempotency-Key header is required', 400);
@@ -22,7 +23,7 @@ router.post('/operations', async (req, res) => {
   }
 });
 
-router.get('/', async (req, res) => {
+router.get('/', requireScope('inventory:read'), async (req, res) => {
   const locationId = Number(req.query.location_id);
   if (!Number.isInteger(locationId)) return res.status(400).json({ error: 'location_id required' });
   const r = await pool.query(
@@ -36,7 +37,7 @@ router.get('/', async (req, res) => {
   res.json(r.rows);
 });
 
-router.get('/:productId/movements', async (req, res) => {
+router.get('/:productId/movements', requireScope('inventory:read'), async (req, res) => {
   const productId = Number(req.params.productId);
   if (!Number.isInteger(productId)) return res.status(400).json({ error: 'invalid product id' });
   const r = await pool.query(

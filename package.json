@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "migrate": "tsx src/migrate.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "key": "tsx src/scripts/api-key.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
