@@ -5,6 +5,16 @@ import { pool } from '../db/pool.js';
 export const SCOPES = ['inventory:read', 'inventory:write'] as const;
 export type Scope = (typeof SCOPES)[number];
 
+export type AuthContext = { keyId: string; name: string; scopes: string[] };
+
+declare global {
+  namespace Express {
+    interface Request {
+      auth?: AuthContext;
+    }
+  }
+}
+
 /** inv1.<uuid key_id>.<secret base64url> */
 const KEY_RE = /^Bearer\s+inv1\.([0-9a-f-]{36})\.([A-Za-z0-9_-]{20,})$/;
 
@@ -22,8 +32,8 @@ export function requireScope(scope: Scope): RequestHandler {
 
     try {
       const [, keyId, secret] = m;
-      const r = await pool.query<{ secret_hash: Buffer; scopes: string[] }>(
-        `SELECT secret_hash, scopes
+      const r = await pool.query<{ name: string; secret_hash: Buffer; scopes: string[] }>(
+        `SELECT name, secret_hash, scopes
            FROM api_keys
           WHERE key_id = $1
             AND revoked_at IS NULL
@@ -43,6 +53,8 @@ export function requireScope(scope: Scope): RequestHandler {
       if (!row.scopes.includes(scope)) {
         return res.status(403).json({ error: 'FORBIDDEN' });
       }
+
+      req.auth = { keyId, name: row.name, scopes: row.scopes };
       next();
     } catch (e) {
       // fail CLOSED เสมอ — DB ล่มต้องไม่กลายเป็นประตูเปิด

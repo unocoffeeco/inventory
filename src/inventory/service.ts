@@ -18,6 +18,9 @@ function canon(v: unknown): string {
   return JSON.stringify(v);
 }
 
+/** ใครทำ operation นี้ — apiKeyId มาจาก auth (ปลอมไม่ได้) / actor มาจาก X-Actor (client อ้าง) */
+export type Attribution = { apiKeyId: string | null; actor: string | null };
+
 /** ปรับยอดแบบ atomic — delta ลบจะถูกปฏิเสธถ้ายอดไม่พอ */
 async function applyDelta(c: PoolClient, productId: number, locationId: number, delta: number) {
   if (delta === 0) return;
@@ -53,20 +56,24 @@ async function addMovement(
   );
 }
 
-export async function postOperation(idempotencyKey: string, input: Op) {
+export async function postOperation(
+  idempotencyKey: string,
+  input: Op,
+  attribution: Attribution = { apiKeyId: null, actor: null },
+) {
   const c = await pool.connect(); // ใช้ connection เดียวตลอด transaction
   try {
     await c.query('BEGIN');
 
     const ins = await c.query(
-      `INSERT INTO inventory_operations (idempotency_key, kind, request)
-       VALUES ($1, $2, $3)
+      `INSERT INTO inventory_operations (idempotency_key, kind, request, api_key_id, actor)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
-      [idempotencyKey, input.kind, input],
+      [idempotencyKey, input.kind, input, attribution.apiKeyId, attribution.actor],
     );
 
-    // ส่งซ้ำด้วย key เดิม
+    // ส่งซ้ำด้วย key เดิม → คืนผลเดิม และ "ไม่ทับ" attribution (การกระทำนี้เกิดครั้งแรกครั้งเดียว)
     if (ins.rowCount === 0) {
       const prev = await c.query(
         `SELECT request, result FROM inventory_operations WHERE idempotency_key = $1`,
@@ -79,6 +86,7 @@ export async function postOperation(idempotencyKey: string, input: Op) {
     }
 
     const opId: number = ins.rows[0].id;
+
     // 1) ตรวจปลายทาง + รวมคีย์ทั้งหมดก่อนแตะข้อมูล (ทำครั้งเดียว)
     const keys: { productId: number; locationId: number }[] = [];
     for (const l of input.lines) {
@@ -89,6 +97,7 @@ export async function postOperation(idempotencyKey: string, input: Op) {
         keys.push({ productId: l.productId, locationId: l.toLocationId! });
       }
     }
+
     // 2) ล็อกทุกแถวตามลำดับ global → กัน deadlock
     await lockBalances(c, keys);
 
@@ -105,16 +114,12 @@ export async function postOperation(idempotencyKey: string, input: Op) {
         await applyDelta(c, l.productId, l.locationId, l.qty);
         await addMovement(c, opId, ++line, l.productId, l.locationId, l.qty);
       } else {
-        // transfer: ตรวจปลายทางให้มีจริงก่อน แล้วจึงตัดต้นทาง + เพิ่มปลายทาง
-        const dst = await c.query('SELECT 1 FROM locations WHERE id = $1', [l.toLocationId!]);
-        if (dst.rowCount === 0) throw new AppError('DESTINATION_NOT_FOUND', 404);
-
+        // transfer: ปลายทางถูกตรวจแล้วในขั้นที่ 1 → ที่นี่แค่ตัดต้นทาง + เพิ่มปลายทาง
         await applyDelta(c, l.productId, l.locationId, -l.qty);
         await applyDelta(c, l.productId, l.toLocationId!, l.qty);
         await addMovement(c, opId, ++line, l.productId, l.locationId, -l.qty);
         await addMovement(c, opId, ++line, l.productId, l.toLocationId!, l.qty);
       }
-
     }
 
     const result = { operationId: opId, kind: input.kind, status: 'committed' };
@@ -128,6 +133,7 @@ export async function postOperation(idempotencyKey: string, input: Op) {
     c.release();
   }
 }
+
 /** ล็อกทุกแถวที่จะแตะ ในลำดับ (product_id, location_id) เดียวกันเสมอ → ไม่มี cycle → ไม่ deadlock */
 async function lockBalances(c: PoolClient, keys: { productId: number; locationId: number }[]) {
   const unique = [...new Map(keys.map((k) => [`${k.productId}:${k.locationId}`, k])).values()]
