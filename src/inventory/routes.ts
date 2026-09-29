@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../db/pool.js';
 import { AppError, postOperation } from './service.js';
-import { opSchema } from './schemas.js';
+import { movementListSchema, opSchema } from './schemas.js';
 import { requireScope } from '../auth/apiKeys.js';
 import { fail } from '../http/fail.js';
 
@@ -49,14 +49,15 @@ router.get('/:productId/movements', requireScope('inventory:read'), async (req, 
   try {
     const productId = Number(req.params.productId);
     if (!Number.isInteger(productId)) return res.status(400).json({ error: 'invalid product id' });
+    const q = movementListSchema.parse(req.query);
     const r = await pool.query(
       `SELECT m.location_id, m.delta, m.created_at, o.kind, o.actor, o.api_key_id
          FROM inventory_movements m
          JOIN inventory_operations o ON o.id = m.operation_id
         WHERE m.product_id = $1
-        ORDER BY m.created_at DESC, m.line_no DESC
-        LIMIT 100`,
-      [productId],
+        ORDER BY m.created_at DESC, m.operation_id DESC, m.line_no DESC
+        LIMIT $2 OFFSET $3`,
+      [productId, q.limit, q.offset],
     );
     res.json(r.rows);
   } catch (e) {
