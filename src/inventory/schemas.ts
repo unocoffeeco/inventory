@@ -1,9 +1,15 @@
 import { z } from 'zod';
 
+/**
+ * id จาก DB เป็น bigint → pg คืนเป็น **string** เสมอ (เหมือน operationId)
+ * จึงต้อง coerce เพื่อให้ client เอา id ที่เพิ่ง GET มาใช้ต่อได้เลย
+ */
+const idRef = z.coerce.number().int().positive();
+
 export const lineSchema = z.object({
-  productId: z.number().int().positive(),
-  locationId: z.number().int().positive(),
-  toLocationId: z.number().int().positive().optional(),
+  productId: idRef,
+  locationId: idRef,
+  toLocationId: idRef.optional(),
   qty: z.number().int(), // adjustment อนุญาตค่าลบ, ชนิดอื่นบังคับ > 0 ด้านล่าง
 });
 
